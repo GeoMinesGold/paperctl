@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 import re
 import csv
+import mimetypes
 
 def load_codes(codes_files):
     """Load codes from the CSV codes file into a dictionary."""
@@ -64,6 +65,10 @@ edexcel = {
 types_pattern = create_pattern(types)
 edexcel_types_pattern = create_pattern(edexcel["types"])
 months_pattern = create_pattern(months)
+
+def is_valid_type(file_path):
+    mime_type, _ = mimetypes.guess_type(file_path)
+    return mime_type is not None
 
 def parse_board(board, human=True):
     board = str(board).lower()
@@ -192,7 +197,7 @@ def parse_pattern(file_path):
                 print(f"Skipping: {file_path}, missing details")
                 return None
 
-            return general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number
+            return general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number, regex
     
     return None
 
@@ -341,7 +346,7 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
     month = parse_month(month, human).lower()
     year = parse_year(year, short).lower()
 
-    if file_name and board:
+    if file_name and board_short:
         if code and month and year and type_str and number and variant:
             file_name = f"{board_short}_{code}_{month}{year}_{type_str}_{number}{variant}{file_name.suffix}"
         elif code and month and year and type_str and number:
@@ -355,27 +360,43 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
         else:
             print(f"Error normalizing file {file_path}: missing details")
             return None
+    else:
+        print(f"Error normalizing file {file_path}: missing details")
+        return None
 
-    file_path = file_path.parent / file_name
+    file_path = Path(file_path.parent / file_name)
     return file_path
 
 def process_file(file_path, output_dir, files):
     """Process a single file."""
     try:
-        details = parse_pattern(file_path)
+        *details, pattern = parse_pattern(file_path)
         if details:
+
+            general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number = [ item if item is not None else None for item in details ]            
+            year = str(year)
+
             if args.verbose:
                 print(f"File path: {file_path}")
                 print(f"File details: {details}")
+            if args.output_pattern:
+                print(f"Pattern details: {pattern}")
 
-            general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number = [ item if item is not None else None for item in details ]            
+            main_dir = Path(output_dir) / board / level / general_subject
 
-            year = str(year)
+            if detailed_subject:
+                if master_code:
+                    main_dir = main_dir / f"{detailed_subject} ({master_code})"
+                else:
+                    main_dir = main_dir / f"{detailed_subject}"
 
-            if master_code:
-                main_dir = Path(output_dir) / board / level / f"{general_subject}/{detailed_subject} ({master_code})"
-            else:
-                main_dir = Path(output_dir) / board / level / f"{general_subject}/{detailed_subject}" 
+            if args.fuzzy and not type_str:
+                file_path_lower = file_path.parent.lower()
+
+                if "syllabus" in file_path_lower:
+                    type_str = "Syllabus"
+                elif "notes" in file_path_lower or "resources" in file_path_lower:
+                    type_str = "Notes"
 
 
             if type_str == "Syllabus":
@@ -395,6 +416,10 @@ def process_file(file_path, output_dir, files):
                 return None
             else:
                 files.append(target_file)
+
+            if not is_valid_type(file_path):
+                print(f"Error handling file {file_path}: file is not valid")
+                return None
 
             # Check if it's a dry run
             if args.dry_run:
@@ -444,7 +469,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="print detailed information")
     parser.add_argument("-q", "--quiet", action="store_true", help="output only errors")
     parser.add_argument("-C", "--copy", action="store_true", help="copy instead of moving files")
-#    parser.add_argument("-P", "--output-pattern", action="store_true", help="output the pattern being matched")
+    parser.add_argument("-P", "--output-pattern", action="store_true", help="output the pattern being matched")
     parser.add_argument("-F", "--fuzzy", action="store_true", help="find data using fuzzy matching if pattern matching fails")
 
     args = parser.parse_args()
