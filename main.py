@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import csv
 import mimetypes
+from datetime import datetime
 
 def load_codes(codes_files):
     """Load codes from the CSV codes file into a dictionary."""
@@ -122,10 +123,14 @@ def parse_pattern(file_path):
         },
     ]
 
+    year_pattern = r"([0-9]{4}"
+    edexcel_papers = ["c4", "c3", "c2", "c1", "m1", "m2", "m3", "m4", "m5", "s1", "s2", "s3", "s4", "s5", "p1", "p2", "p3", "p4", "fp1", "fp2", "fp3",
+   "c12", "c34", "core1", "core2", "core3", "core4", "mech1", "stat1"]
+    current_year = datetime.now().year 
     
     file_path = Path(file_path)
     file_name = file_path.name.lower()
-
+    match = int(re.search(year_pattern, file_name))
     if args.fuzzy:
         if "jan" in file_name:
             month="January"
@@ -135,6 +140,18 @@ def parse_pattern(file_path):
             month="May-June"
         elif "oct" in file_name or "nov" in file_name:
             month="Oct-Nov"
+        if match:
+            if match >= 2000 and match <= current_year:
+                year = match
+            else:
+                code = match
+        for edexcel_paper in edexcel_papers:    
+            if edexcel_paper in file_name:
+                paper = edexcel_paper 
+                break 
+        if "(r)" in file_name:
+            paper = f"{paper}R"
+            
 
     for pattern in patterns:
         regex = pattern["regex"]
@@ -389,6 +406,7 @@ def process_file(file_path, output_dir, files):
                     main_dir = main_dir / f"{detailed_subject} ({master_code})"
                 else:
                     main_dir = main_dir / f"{detailed_subject}"
+            main_dir = main_dir / number     
 
             if args.fuzzy and not type_str:
                 file_path_lower = file_path.parent.lower()
