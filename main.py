@@ -5,9 +5,27 @@ import zipfile
 import argparse
 from pathlib import Path
 import re
-import csv
 import mimetypes
+from urllib.parse import urlparse
 from datetime import datetime
+import csv
+
+args = {}
+codes = {}
+
+def is_url(url):
+    url = str(url).strip()
+
+    # Ensure URL starts with a valid scheme
+    if not url.startswith(("http://", "https://", "ftp://")):
+        url = f"https://{url}"
+
+    try:
+        result = urlparse(url)
+        # Ensure scheme and netloc exist, and netloc contains at least one dot
+        return all([result.scheme, result.netloc]) and "." in result.netloc
+    except ValueError:
+        return False
 
 def load_codes(codes_files):
     """Load codes from the CSV codes file into a dictionary."""
@@ -67,9 +85,26 @@ types_pattern = create_pattern(types)
 edexcel_types_pattern = create_pattern(edexcel["types"])
 months_pattern = create_pattern(months)
 
-def is_valid_type(file_path):
+def is_valid_file(file_path, valid_mimetypes=None):
+    """
+    Checks if a file exists, is not empty, and has a valid MIME type.
+    
+    :param file_path: Path to the file.
+    :param valid_mimetypes: List of allowed MIME types (optional).
+    :return: True if file meets all conditions, False otherwise.
+    """
+    # Check if file exists and is not empty
+    if not os.path.isfile(file_path) or os.path.getsize(file_path) == 0:
+        return False
+
+    # Get MIME type
     mime_type, _ = mimetypes.guess_type(file_path)
-    return mime_type is not None
+
+    # If valid_mimetypes is provided, check if MIME type is allowed
+    if valid_mimetypes and (mime_type not in valid_mimetypes):
+        return False
+
+    return True
 
 def parse_board(board, human=True):
     board = str(board).lower()
@@ -97,7 +132,7 @@ def parse_board(board, human=True):
                 return abbrs[0]  # Return the first abbreviation
     return None
 
-def parse_pattern(file_path):
+def parse_pattern(file_path, is_file):
     """
     Parse the file name to extract board, code, month, year, type, paper number, and variant.
     Returns a dictionary with the extracted details or None if no match is found.
@@ -106,122 +141,177 @@ def parse_pattern(file_path):
         {
             "pattern_number": 1,
             "board": "Cambridge",
-            "regex": rf"^([a-z0-9]+)?(?:[-_]+)?([0-9]{{4}})[-_]+({months_pattern})([0-9]{{2}})[-_]+({types_pattern})(?:[-_]+)?([0-9]+)?(?:.*)?$",
+            "regex": rf"^([a-z0-9]+)?(?:[-_]+)?([0-9]{{4}})[-_]+({months_pattern})([0-9]{{2}})[-_]+({types_pattern})(?:[-_]+)?([0-9]+)?(?:\..*)?$",
             "fields": ["board", "code", "month", "year", "type_str", "paper"]
         },
         {
             "pattern_number": 2,
             "board": "Edexcel",
-            "regex": rf"^([a-z0-9]+)[-_]+([a-z0-9]+)[-_]+({edexcel_types_pattern})[-_]+([0-9]+)(?:.*)?$",
+            "regex": rf"^([a-z0-9]+)[-_]+([a-z0-9]+)[-_]+({edexcel_types_pattern})[-_]+([0-9]+)(?:\..*)?$",
             "fields": ["code", "paper", "type_str", "date"]
         },
         {
             "pattern_number": 3,
             "board": "Edexcel",
-            "regex": r"^(mark.*|question.*|examiner.*)[-_]+(?:paper|unit)([a-z0-9]+)[-_(]+?([a-z0-9]+)[-_)]+?(?:[-_(]+?legacy[-_)]+?|[-_]?paper[a-z0-9]+)?[-_]+([a-z]+)([0-9]{4})(?:.*)?$",
+            "regex": r"^(mark.*|question.*|examiner.*)[-_]+(?:paper|unit)([a-z0-9]+)[-_(]+?([a-z0-9]+)[-_)]+?(?:[-_(]+?legacy[-_)]+?|[-_]?paper[a-z0-9]+)?[-_]+([a-z]+)([0-9]{4})(?:\..*)?$",
             "fields": ["type_str", "paper", "code", "month", "year"]
         },
     ]
 
-    year_pattern = r"([0-9]{4}"
-    edexcel_papers = ["c4", "c3", "c2", "c1", "m1", "m2", "m3", "m4", "m5", "s1", "s2", "s3", "s4", "s5", "p1", "p2", "p3", "p4", "fp1", "fp2", "fp3",
-   "c12", "c34", "core1", "core2", "core3", "core4", "mech1", "stat1"]
+    year = paper = code = pattern_number = month = date = type_str = board = name = None
+
+    start_year = 2000
     current_year = datetime.now().year 
+    year_pattern = r"\d{4}" 
+    edexcel_papers = ["c4", "c3", "c2", "c1", "m1", "m2", "m3", "m4", "m5", "s1", "s2", "s3", "s4", "s5", "p1", "p2", "p3", "p4", "fp1", "fp2", "fp3","c12", "c34"]
+    extracted_values = {}
     
     file_path = Path(file_path)
     file_name = file_path.name.lower()
-    match = int(re.search(year_pattern, file_name))
-    if args.fuzzy:
-        if "jan" in file_name:
-            month="January"
-        elif "feb" in file_name or "mar" in file_name:
-            month="Feb-March"
-        elif "may" in file_name or "jun" in file_name:
-            month="May-June"
-        elif "oct" in file_name or "nov" in file_name:
-            month="Oct-Nov"
-        if match:
-            if match >= 2000 and match <= current_year:
-                year = match
-            else:
-                code = match
-        for edexcel_paper in edexcel_papers:    
-            if edexcel_paper in file_name:
-                paper = edexcel_paper 
-                break 
-        if "(r)" in file_name:
-            paper = f"{paper}R"
-            
 
     for pattern in patterns:
         regex = pattern["regex"]
         match = re.match(regex, file_name)
         if match:
-            pattern_number = pattern["pattern_number"]
-            groups = match.groups()
-            
-            extracted_values = {field: groups[i].upper() if field in ["code", "paper"] else groups[i] for i, field in enumerate(pattern["fields"]) if i < len(groups) and field and groups[i]}
-            
-            if extracted_values.get("board"):
-                board = extracted_values.get("board")
-            else:
-                board = pattern["board"]
-
-            if board:
-                board = parse_board(board)
-            else:
-                print("Skipping, board does not exist")
-                return None
-
-            paper = extracted_values.get("paper")
-            if paper:
-                if paper.startswith("0"): 
-                    number, variant = paper[1], "0"
-                elif len(paper) == 1:
-                    number, variant = paper, "0"
-                elif paper[-1].lower() == "r":
-                    number, variant = paper[:-1], "R"
-                elif len(paper) == 2 and paper.isdigit():
-                    number, variant = paper[0], paper[1]
-                else:
-                    number, variant = paper, "0"
-            else:
-                number, variant = None, None
-           
-            date = extracted_values.get("date")
-            if date and len(date) >= 8:
-                year = date[:4]
-                month = date[4:6]
-            else:
-                year = extracted_values.get("year")
-                month = extracted_values.get("month")
-
-            type_str = parse_type(extracted_values.get("type_str"))
-            month, year = parse_date(month, year, type_str, board, pattern_number)
-            code = extracted_values.get("code")
-            
-            name = f"{board}_{code}"
-            if name in codes:
-                details = codes[name]
-            else:
-                print(f"Code {name} not found in codes, skipping")
-                return None
-
-
-            level, general_subject, detailed_subject, master_code = (details.get(key) for key in ["level", "general_subject", "detailed_subject", "master_code"])
-
-            if not code or not board or not level or not general_subject or not month or not year:
-                print(f"Skipping: {file_path}, missing details")
-                return None
-
-            return general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number, regex
+            break
     
-    return None
+    if not match:
+        if args.fuzzy:
+            # Get month from file name
+            if "jan" in file_name:
+                month="January"
+            elif "feb" in file_name or "mar" in file_name:
+                month="Feb-March"
+            elif "may" in file_name or "jun" in file_name:
+                month="May-June"
+            elif "oct" in file_name or "nov" in file_name:
+                month="Oct-Nov"
+
+            digits_list = re.findall(year_pattern, file_name)
+
+            for digits in digits_list:
+                if digits:
+                    digits = int(digits)
+                    if digits >= start_year and digits <= current_year:
+                        year = digits
+                    elif digits in codes:
+                        code = digits
+
+                    if year and code:
+                        break
+
+            for edexcel_paper in edexcel_papers:    
+                if edexcel_paper in file_name:
+                    paper = edexcel_paper.upper()
+                    break 
+
+            if "(r)" in file_name:
+                paper = f"{paper}R"
+            
+            for t in types:
+                if t in file_name:
+                    type_str = t
+                    break
+        else:
+            return None
+
+    if match:
+        pattern_number = pattern["pattern_number"]
+        groups = match.groups()
+        extracted_values = {field: groups[i].upper() if field in ["code", "paper"] else groups[i] for i, field in enumerate(pattern["fields"]) if i < len(groups) and field and groups[i]}
+
+    if extracted_values and extracted_values.get("board"):
+        board = extracted_values.get("board")
+    elif pattern["board"]:
+        board = pattern["board"]
+
+    if board:
+        board = parse_board(board)
+    else:
+        if args.verbose and is_file:
+            print("Skipping, board does not exist")
+        return None
+
+    if not paper:
+        paper = extracted_values.get("paper")
+
+    if paper:
+        if paper.startswith("0"): 
+            number, variant = paper[1], "0"
+        elif len(paper) == 1:
+            number, variant = paper, "0"
+        elif paper[-1].lower() == "r":
+            number, variant = paper[:-1], "R"
+        elif len(paper) == 2 and paper.isdigit():
+            number, variant = paper[0], paper[1]
+        else:
+            number, variant = paper, "0"
+        paper = None
+    else:
+        number, variant = None, None
+    
+    if extracted_values:
+        date = extracted_values.get("date")
+    if date and len(date) >= 8:
+        year = date[:4]
+        month = date[4:6]
+    else:
+        if not year:
+            year = extracted_values.get("year")
+        if not month:
+            month = extracted_values.get("month")
+
+    if not type_str:
+        type_str = extracted_values.get("type_str")
+    
+    if type_str:
+        type_str = parse_type(type_str)
+
+    if month and year:
+        month, year = parse_date(month, year, type_str, board, pattern_number)
+
+    if not code and extracted_values:
+            code = extracted_values.get("code")
+
+    if args.manual and is_file: 
+        if not code:
+            code = input("Enter code here: ")
+        if not type_str:
+            type_str = input("Enter type here: ")
+        if not month:
+            month = input("Enter month here: ")
+        if not year:
+            month = input("Enter year here: ")
+        if not number:
+            number = input("Enter paper number here: ")
+        if not variant:
+            variant = input("Enter paper variant here: ")
+
+    if board and code: 
+        name = f"{board}_{code}"
+    if name and codes and name in codes:
+        details = codes[name]
+    else:
+        if args.verbose and is_file:
+            print(f"Code {name} not found in codes, skipping")
+        return None
+
+
+    level, general_subject, detailed_subject, master_code = (details.get(key) for key in ["level", "general_subject", "detailed_subject", "master_code"])
+
+    if not code or not board or not level or not general_subject or not month or not year:
+        if args.verbose:
+            print(f"Skipping {file_path}: missing details")
+        return None
+
+    return general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number, regex
 
 def parse_date(month, year, type_str, board, pattern):
+    # Parses correct month and year depending on the board and pattern
     year = parse_year(year)
     if not year or not isinstance(year, int):
-        print(f"Invalid year: {year}")
+        if args.verbose:
+            print(f"Invalid year: {year}")
         return None, None
 
     month = parse_month(month)
@@ -238,7 +328,7 @@ def parse_date(month, year, type_str, board, pattern):
     return month, year
 
 def parse_type(type_str, human=True):
-    """Convert type abbreviations to standardized names and vice versa."""
+    # Convert type abbreviations to standardized names and vice versa.
     type_str = str(type_str).lower()
     
     type_map = {
@@ -277,7 +367,7 @@ def parse_type(type_str, human=True):
     return None
     
 def parse_month(month, human=True):
-    """Convert month abbreviations or numbers into session format and vice versa."""
+    # Convert month abbreviations or numbers into session format and vice versa
     month = str(month).lower()
     
     if month.isdigit():
@@ -315,7 +405,8 @@ def parse_year(year, short=False):
     year = str(year).strip()
 
     if not year.isdigit():
-        print(f"Invalid input: no year provided")
+        if args.verbose:
+            print(f"Invalid year: {year}")
         return None  # Return None if the year is not a number
 
     if short:
@@ -324,7 +415,7 @@ def parse_year(year, short=False):
         return int(f"20{year[-2:]}" if len(year) == 2 else year)  # Convert to 4 digits if necessary
 
 def unzip_rm_file(zip_file, target_dir, file_name):
-    """Unzip a file into the target directory without moving the zip file, then deletes the original file."""
+    # Unzip a file into the target directory without moving the zip file, then delete the original file
     try:
         # Create the folder for the zip file
         extracted_folder = Path(target_dir) / file_name
@@ -355,6 +446,7 @@ def unzip_rm_file(zip_file, target_dir, file_name):
         return None
 
 def normalize_file(file_path, board, type_str, number, variant, year, month, code, human=False, short=True):
+    # Normalizes/standardizes file names for consistency
     file_name = Path(file_path.name)
 
     code = code.lower()
@@ -362,6 +454,9 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
     type_str = parse_type(type_str, human).lower()
     month = parse_month(month, human).lower()
     year = parse_year(year, short).lower()
+
+    if board == "Edexcel" and not variant == "R":
+        variant = None
 
     if file_name and board_short:
         if code and month and year and type_str and number and variant:
@@ -375,30 +470,41 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
         elif code and year:
             file_name = f"{board_short}_{code}_{year}{file_name.suffix}"
         else:
-            print(f"Error normalizing file {file_path}: missing details")
+            if args.verbose:
+                print(f"Error normalizing file {file_path}: missing details")
             return None
     else:
-        print(f"Error normalizing file {file_path}: missing details")
+        if args.verbose:
+            print(f"Error normalizing file {file_path}: missing details")
         return None
 
     file_path = Path(file_path.parent / file_name)
     return file_path
 
 def process_file(file_path, output_dir, files):
-    """Process a single file."""
+    # Process a file for moving
     try:
-        *details, pattern = parse_pattern(file_path)
-        if details:
+        # Get details
+        result = parse_pattern(file_path, True)  
 
+        if result:  # If result is not False or None
+            *details, pattern = result
+        else:
+            details = []  # Default empty list if unpacking fails
+            pattern = None  # Default None for pattern
+
+        if details:
             general_subject, detailed_subject, board, level, master_code, code, type_str, number, variant, year, month, pattern_number = [ item if item is not None else None for item in details ]            
             year = str(year)
 
+            # Output details
             if args.verbose:
                 print(f"File path: {file_path}")
                 print(f"File details: {details}")
             if args.output_pattern:
                 print(f"Pattern details: {pattern}")
 
+            # Create directory structure
             main_dir = Path(output_dir) / board / level / general_subject
 
             if detailed_subject:
@@ -406,16 +512,8 @@ def process_file(file_path, output_dir, files):
                     main_dir = main_dir / f"{detailed_subject} ({master_code})"
                 else:
                     main_dir = main_dir / f"{detailed_subject}"
-            main_dir = main_dir / number     
-
-            if args.fuzzy and not type_str:
-                file_path_lower = file_path.parent.lower()
-
-                if "syllabus" in file_path_lower:
-                    type_str = "Syllabus"
-                elif "notes" in file_path_lower or "resources" in file_path_lower:
-                    type_str = "Notes"
-
+            if args.number:
+                main_dir = main_dir / number     
 
             if type_str == "Syllabus":
                 target_dir = main_dir / "Syllabus"
@@ -429,15 +527,24 @@ def process_file(file_path, output_dir, files):
 
             target_file = target_dir / modified_file_name
 
+            # Skip invalid files
+            if not is_valid_file(file_path):
+                print(f"Error handling file {file_path}: file is not valid")
+                return None
+
+            # Skip already existing files
+            if os.path.exists(target_file) and not args.force:
+                if args.verbose:
+                    print(f"Skipping: {file_path}, already exists at {target_file}")
+                return None
+
+            # Skip already processed files
             if target_file in files:
-                print(f"Skipping: {file_path}, already processed")
+                if args.verbose:
+                    print(f"Skipping: {file_path}, already processed")
                 return None
             else:
                 files.append(target_file)
-
-            if not is_valid_type(file_path):
-                print(f"Error handling file {file_path}: file is not valid")
-                return None
 
             # Check if it's a dry run
             if args.dry_run:
@@ -449,9 +556,6 @@ def process_file(file_path, output_dir, files):
                     else:
                         print(f"Would move {file_path} to {target_file}")
             else:
-                if os.path.exists(target_file):
-                    print(f"Skipping: {file_path}, already exists at {target_file}")
-                    return None
                 # Create the target directory structure
                 target_dir.mkdir(parents=True, exist_ok=True)
 
@@ -469,58 +573,114 @@ def process_file(file_path, output_dir, files):
                         shutil.move(file_path, target_file)
 
         else:
+            # Output details
             if args.verbose:
                 print(f"Skipping: {file_path}, no matching details")
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
 
 def main():
+    # Global arrays for arguments and codes
     global args
     global codes
 
+    # Get arguments
     parser = argparse.ArgumentParser(description="A custom-built tool to sort IGCSE past paper files.")
     parser.add_argument("paths", nargs='+', help="paths to files or directories to process")
-    parser.add_argument("-o", "--output", required=True, help="directory to store sorted files")
-    parser.add_argument("-c", "--codes", nargs='+', required=True, help="files containing board codes")
+    parser.add_argument("-o", "--output", help="directory to store sorted files")
+    parser.add_argument("-c", "--codes", nargs='+', help="files containing board codes")
     parser.add_argument("-r", "--recursive", action="store_true", help="index files recursively")
     parser.add_argument("-n", "--dry-run", action="store_true", help="show what would happen without making changes")
     parser.add_argument("-v", "--verbose", action="store_true", help="print detailed information")
     parser.add_argument("-q", "--quiet", action="store_true", help="output only errors")
+    parser.add_argument("-f", "--force", action="store_true", help="forcibly process files")
     parser.add_argument("-C", "--copy", action="store_true", help="copy instead of moving files")
     parser.add_argument("-P", "--output-pattern", action="store_true", help="output the pattern being matched")
     parser.add_argument("-F", "--fuzzy", action="store_true", help="find data using fuzzy matching if pattern matching fails")
+    parser.add_argument("-N", "--number", action="store_true", help="add the paper number to the directory structure")
+    parser.add_argument("-Q", "--quit", action="store_true", help="quit on some errors")
+    parser.add_argument("-m", "--manual", action="store_true", help="manually enter data if needed")
 
     args = parser.parse_args()
-
-    # Load the codes
-    codes = load_codes(args.codes)
 
     # Prepare an array for files
     files = []
 
-    # Add each file to the array
+    # Filter arguments for processing
     for path in args.paths:
-        path = Path(path)
-        if path.is_file():
-            files.append(path)
-        elif path.is_dir():
-            if args.recursive:
-                for file in path.rglob("*"):
-                    files.append(file)
+        if is_url(path):
+            # URLs are currently unsupported
+            if args.verbose:
+                print(f"Skipping URL: {path}, currently unsupported") 
+            continue
+        else:
+            path = Path(path)
+            if path.is_file():
+                files.append(path)
+            elif path.is_dir():
+                if args.recursive:
+                    for file in path.rglob("*"):
+                        files.append(file)
+                else:
+                    for file in path.glob("*"):
+                        files.append(file)
             else:
-                for file in path.glob("*"):
-                    files.append(file)
+                if args.quit:
+                    print(f"Invalid path: {path}, exiting")
+                    return None
+                else:
+                    if args.verbose:
+                        print(f"Invalid path: {path}")
+
 
     # Filter out unwanted files if directory is a match for the pattern
-    filtered_files = [
-        file for file in files
-        if file.is_file() and not any(parse_pattern(str(parent)) for parent in Path(file).parents)
-    ]
+    filtered_files = set()
+    filtered_dirs = {}
+
+    for file in files:
+        if file.is_file():
+            for parent in Path(file).parents:
+                pattern = parse_pattern(str(parent), False)
+                if pattern:
+                    filtered_dirs[parent] = {pattern}
+            else:
+                filtered_files.add(file)
+
+    filtered_files = list(filtered_files)
+
+    # Load the codes
+    if args.codes:
+        codes = load_codes(args.codes)
 
     # Process the remaining files
-    processed_files = []
-    for file in filtered_files:
-        process_file(file, args.output, processed_files)
+    if args.output:
+        if args.codes:
+            processed_files = []
+            for file in filtered_files:
+                process_file(file, args.output, processed_files)
+                """
+            for dir in filtered_dirs:
+                if args.verbose:
+                    print(f"Processing directory: {dir}")
+                details = filtered_dirs[dir]
+                needed_indices = [2, 6, 7, 8, 9, 10, 5]  # Indices of required values in details
+                filtered_details = [details[i] for i in needed_indices]  # Extract required values
+                board, type_str, number, variant, year, month, code = filtered_details  # Unpack
+                name = normalize_file(dir, board, type_str, number, variant, year, month, code)
+                if args.dry_run: 
+                    if not args.quiet:
+                        print(f"Would move directory {dir} to {name}")
+                elif args.copy:
+                    if not args.quiet:
+                        print(f"Would move directory {dir} to {name}")
+                    shutil.copy(dir, name)
+                else:
+                    if not args.quiet:
+                        shutil.move(dir, name)
+                """
+        else:
+            print(f"No codes found, exiting")
+            return None
 
 if __name__ == "__main__":
     main()
