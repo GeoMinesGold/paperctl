@@ -75,7 +75,7 @@ def create_pattern(items, delimiter="|"):
     return delimiter.join(items)
 
 months = ["j", "m", "s", "w", "y"]
-types = ["qp", "sp", "ms", "sm", "in", "pm", "gt", "er", "ab", "ci", "sc", "ir", "ss", "sf", "sy", "su", "gd", "fq"]
+types = ["qp", "sp", "ms", "sm", "in", "pm", "gt", "er", "ab", "ci", "sc", "ir", "ss", "sf", "sy", "su", "gd", "fq", "qr"]
 
 edexcel = {
     "types":  ["que", "msc", "mcs", "rms", "pef"],
@@ -176,42 +176,41 @@ def parse_pattern(file_path, is_file):
             break
     
     if not match:
-        if args.fuzzy:
-            # Get month from file name
-            if "jan" in file_name:
-                month="January"
-            elif "feb" in file_name or "mar" in file_name:
-                month="Feb-March"
-            elif "may" in file_name or "jun" in file_name:
-                month="May-June"
-            elif "oct" in file_name or "nov" in file_name:
-                month="Oct-Nov"
+        # Get month from file name
+        if "jan" in file_name:
+            month="January"
+        elif "feb" in file_name or "mar" in file_name:
+            month="Feb-March"
+        elif "may" in file_name or "jun" in file_name:
+            month="May-June"
+        elif "oct" in file_name or "nov" in file_name:
+            month="Oct-Nov"
 
-            digits_list = re.findall(year_pattern, file_name)
+        digits_list = re.findall(year_pattern, file_name)
 
-            for digits in digits_list:
-                if digits:
-                    digits = int(digits)
-                    if digits >= start_year and digits <= current_year:
-                        year = digits
-                    elif digits in codes:
-                        code = digits
+        for digits in digits_list:
+            if digits:
+                digits = int(digits)
+                if digits >= start_year and digits <= current_year:
+                    year = digits
+                elif digits in codes:
+                    code = digits
 
-                    if year and code:
-                        break
-
-            for edexcel_paper in edexcel_papers:    
-                if edexcel_paper in file_name:
-                    paper = edexcel_paper.upper()
-                    break 
-
-            if "(r)" in file_name:
-                paper = f"{paper}R"
-            
-            for t in types:
-                if t in file_name:
-                    type_str = t
+                if year and code:
                     break
+
+        for edexcel_paper in edexcel_papers:    
+            if edexcel_paper in file_name:
+                paper = edexcel_paper.upper()
+                break 
+
+        if "(r)" in file_name:
+            paper = f"{paper}R"
+        
+        for t in types:
+            if t in file_name:
+                type_str = t
+                break
         else:
             return None
 
@@ -343,7 +342,8 @@ def parse_type(type_str, human=True):
         'Support Files': ['sf', 'ss'],
         'Syllabus': ['sy', 'su', 'tu'],
         'Grade Descriptions': ['gd'],
-        'Frequently Asked Questions': ['fq']
+        'Frequently Asked Questions': ['fq'],
+        'Transcript': ['qr']
     }
 
     # Normalize type_map to allow bidirectional lookup
@@ -606,81 +606,9 @@ def main():
     # Prepare an array for files
     files = []
 
-    # Filter arguments for processing
-    for path in args.paths:
-        if is_url(path):
-            # URLs are currently unsupported
-            if args.verbose:
-                print(f"Skipping URL: {path}, currently unsupported") 
-            continue
-        else:
-            path = Path(path)
-            if path.is_file():
-                files.append(path)
-            elif path.is_dir():
-                if args.recursive:
-                    for file in path.rglob("*"):
-                        files.append(file)
-                else:
-                    for file in path.glob("*"):
-                        files.append(file)
-            else:
-                if args.quit:
-                    print(f"Invalid path: {path}, exiting")
-                    return None
-                else:
-                    if args.verbose:
-                        print(f"Invalid path: {path}")
-
-
-    # Filter out unwanted files if directory is a match for the pattern
-    filtered_files = set()
-    filtered_dirs = {}
-
-    for file in files:
-        if file.is_file():
-            for parent in Path(file).parents:
-                pattern = parse_pattern(str(parent), False)
-                if pattern:
-                    filtered_dirs[parent] = {pattern}
-            else:
-                filtered_files.add(file)
-
-    filtered_files = list(filtered_files)
-
     # Load the codes
     if args.codes:
         codes = load_codes(args.codes)
-
-    # Process the remaining files
-    if args.output:
-        if args.codes:
-            processed_files = []
-            for file in filtered_files:
-                process_file(file, args.output, processed_files)
-                """
-            for dir in filtered_dirs:
-                if args.verbose:
-                    print(f"Processing directory: {dir}")
-                details = filtered_dirs[dir]
-                needed_indices = [2, 6, 7, 8, 9, 10, 5]  # Indices of required values in details
-                filtered_details = [details[i] for i in needed_indices]  # Extract required values
-                board, type_str, number, variant, year, month, code = filtered_details  # Unpack
-                name = normalize_file(dir, board, type_str, number, variant, year, month, code)
-                if args.dry_run: 
-                    if not args.quiet:
-                        print(f"Would move directory {dir} to {name}")
-                elif args.copy:
-                    if not args.quiet:
-                        print(f"Would move directory {dir} to {name}")
-                    shutil.copy(dir, name)
-                else:
-                    if not args.quiet:
-                        shutil.move(dir, name)
-                """
-        else:
-            print(f"No codes found, exiting")
-            return None
 
 if __name__ == "__main__":
     main()
