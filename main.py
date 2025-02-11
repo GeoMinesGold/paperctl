@@ -75,7 +75,7 @@ def create_pattern(items, delimiter="|"):
     return delimiter.join(items)
 
 months = ["j", "m", "s", "w", "y"]
-types = ["qp", "sp", "ms", "sm", "in", "pm", "gt", "er", "ab", "ci", "sc", "ir", "ss", "sf", "sy", "su", "gd", "fq", "qr"]
+types = ["qp", "sp", "ms", "sm", "in", "pm", "gt", "er", "et", "eq", "ab", "ci", "sc", "ir", "ss", "sf", "sy", "su", "sg", "tu", "gd", "fq", "qr"]
 
 edexcel = {
     "types":  ["que", "msc", "mcs", "rms", "pef"],
@@ -141,7 +141,7 @@ def parse_pattern(file_path, is_file):
         {
             "pattern_number": 1,
             "board": "Cambridge",
-            "regex": rf"^([a-z0-9]+)?(?:[-_]+)?([0-9]{{4}})[-_]+({months_pattern})([0-9]{{2}})[-_]+({types_pattern})(?:[-_]+)?([0-9]+)?(?:\..*)?$",
+            "regex": rf"^([a-z0-9]+)?(?:[-_]+)?([0-9]{{4}})[-_]+({months_pattern})([0-9]{{2}})(?:[-_]+[0-9]{{2}})?[-_]+({types_pattern})(?:[-_]+)?([0-9]+)?(?:\..*)?$",
             "fields": ["board", "code", "month", "year", "type_str", "paper"]
         },
         {
@@ -340,7 +340,11 @@ def parse_type(type_str, human=True):
         'Answer Booklet': ['ab', 'answer', 'answers', 'booklet', 'formula', 'formula sheet', 'sheet'],
         'Confidential Instructions': ['ci', 'sc', 'ir', 'confidential instructions', 'specimen confidential instructions'],
         'Support Files': ['sf', 'ss'],
-        'Syllabus': ['sy', 'su', 'tu'],
+        'Syllabus': ['sy'],
+        'Syllabus Update': ['su'],
+        'Syllabus Guide': ['sg'],
+        'Technical Update': ['tu'],
+        'Erratum Notice': ['et', 'eq'],
         'Grade Descriptions': ['gd'],
         'Frequently Asked Questions': ['fq'],
         'Transcript': ['qr']
@@ -448,6 +452,10 @@ def unzip_rm_file(zip_file, target_dir, file_name):
 def normalize_file(file_path, board, type_str, number, variant, year, month, code, human=False, short=True):
     # Normalizes/standardizes file names for consistency
     file_name = Path(file_path.name)
+    suffix = file_name.suffix
+
+    if suffix == ".zip":
+        suffix = ""
 
     code = code.lower()
     board_short = parse_board(board, human).lower()
@@ -456,19 +464,19 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
     year = parse_year(year, short).lower()
 
     if board == "Edexcel" and not variant == "R":
-        variant = None
+        variant = ""
 
     if file_name and board_short:
         if code and month and year and type_str and number and variant:
-            file_name = f"{board_short}_{code}_{month}{year}_{type_str}_{number}{variant}{file_name.suffix}"
+            file_name = f"{board_short}_{code}_{month}{year}_{type_str}_{number}{variant}{suffix}"
         elif code and month and year and type_str and number:
-            file_name = f"{board_short}_{code}_{month}{year}_{type_str}_{number}{file_name.suffix}"
+            file_name = f"{board_short}_{code}_{month}{year}_{type_str}_{number}{suffix}"
         elif code and month and year and type_str:
-            file_name = f"{board_short}_{code}_{month}{year}_{type_str}{file_name.suffix}"
+            file_name = f"{board_short}_{code}_{month}{year}_{type_str}{suffix}"
         elif code and year and type_str:
-            file_name = f"{board_short}_{code}_{year}_{type_str}{file_name.suffix}"
+            file_name = f"{board_short}_{code}_{year}_{type_str}{suffix}"
         elif code and year:
-            file_name = f"{board_short}_{code}_{year}{file_name.suffix}"
+            file_name = f"{board_short}_{code}_{year}{suffix}"
         else:
             if args.verbose:
                 print(f"Error normalizing file {file_path}: missing details")
@@ -481,7 +489,7 @@ def normalize_file(file_path, board, type_str, number, variant, year, month, cod
     file_path = Path(file_path.parent / file_name)
     return file_path
 
-def process_file(file_path, output_dir, files):
+def process_file(file_path, output_dir):
     # Process a file for moving
     try:
         # Get details
@@ -528,23 +536,16 @@ def process_file(file_path, output_dir, files):
             target_file = target_dir / modified_file_name
 
             # Skip invalid files
-            if not is_valid_file(file_path):
-                print(f"Error handling file {file_path}: file is not valid")
-                return None
+            if file_path.is_file():
+                if not is_valid_file(file_path):
+                    print(f"Error handling file {file_path}: file is not valid")
+                    return None
 
             # Skip already existing files
             if os.path.exists(target_file) and not args.force:
                 if args.verbose:
                     print(f"Skipping: {file_path}, already exists at {target_file}")
                 return None
-
-            # Skip already processed files
-            if target_file in files:
-                if args.verbose:
-                    print(f"Skipping: {file_path}, already processed")
-                return None
-            else:
-                files.append(target_file)
 
             # Check if it's a dry run
             if args.dry_run:
@@ -579,6 +580,40 @@ def process_file(file_path, output_dir, files):
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
 
+def collect_files_and_dirs(paths):
+    files = []
+    dirs = []
+    urls = []
+
+    for path in paths:
+        if is_url(path):
+            urls.append(path)
+            continue
+
+        path = Path(path)
+
+        if path.is_file():
+            files.append(path)
+        elif path.is_dir():
+            for root, dir_names, file_names in os.walk(path):
+                new_dirs = []
+                for dir_name in dir_names:
+                    pattern = parse_pattern(dir_name, False)
+                    if pattern:  
+                        # If directory matches the pattern, store it and skip traversal
+                        dirs.append(Path(root) / dir_name)
+                    else:
+                        new_dirs.append(dir_name)  # Keep only directories that don’t match the pattern
+
+                # Update dir_names in-place to prevent os.walk() from traversing filtered directories
+                dir_names[:] = new_dirs  
+
+                # Collect files in non-filtered directories
+                for file_name in file_names:
+                    files.append(Path(root) / file_name)
+
+    return files, dirs, urls
+
 def main():
     # Global arrays for arguments and codes
     global args
@@ -596,19 +631,23 @@ def main():
     parser.add_argument("-f", "--force", action="store_true", help="forcibly process files")
     parser.add_argument("-C", "--copy", action="store_true", help="copy instead of moving files")
     parser.add_argument("-P", "--output-pattern", action="store_true", help="output the pattern being matched")
-    parser.add_argument("-F", "--fuzzy", action="store_true", help="find data using fuzzy matching if pattern matching fails")
     parser.add_argument("-N", "--number", action="store_true", help="add the paper number to the directory structure")
     parser.add_argument("-Q", "--quit", action="store_true", help="quit on some errors")
     parser.add_argument("-m", "--manual", action="store_true", help="manually enter data if needed")
 
     args = parser.parse_args()
 
-    # Prepare an array for files
-    files = []
-
     # Load the codes
     if args.codes:
         codes = load_codes(args.codes)
+    
+    files, dirs, urls = collect_files_and_dirs(args.paths)
+
+    for file in files:
+        process_file(file, args.output)
+    
+    for dir in dirs:
+        process_file(dir, args.output)
 
 if __name__ == "__main__":
     main()
