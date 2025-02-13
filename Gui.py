@@ -1,97 +1,79 @@
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.filechooser import FileChooserIconView
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.checkbox import CheckBox
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.popup import Popup
-import subprocess
-import threading
+#!/usr/bin/env python3
+import tkinter
+import customtkinter
+from tkinter import filedialog
 
-class FileSorterGUI(BoxLayout):
-    def __init__(self, **kwargs):
-        super().__init__(orientation='vertical', **kwargs)
-        
-        # File selection
-        self.file_chooser = FileChooserIconView()
-        self.add_widget(self.file_chooser)
-        
-        # Output directory selection
-        self.output_label = Label(text='Output Directory:')
-        self.add_widget(self.output_label)
-        self.output_input = TextInput(hint_text='Select output directory')
-        self.add_widget(self.output_input)
-        self.select_output_btn = Button(text='Browse')
-        self.select_output_btn.bind(on_release=self.select_output)
-        self.add_widget(self.select_output_btn)
-        
-        # Options
-        self.options_layout = BoxLayout(orientation='horizontal')
-        self.verbose_check = CheckBox()
-        self.options_layout.add_widget(Label(text='Verbose Mode'))
-        self.options_layout.add_widget(self.verbose_check)
-        self.dry_run_check = CheckBox()
-        self.options_layout.add_widget(Label(text='Dry Run'))
-        self.options_layout.add_widget(self.dry_run_check)
-        self.manual_check = CheckBox()
-        self.options_layout.add_widget(Label(text='Manual Input'))
-        self.options_layout.add_widget(self.manual_check)
-        self.add_widget(self.options_layout)
-        
-        # Start Button
-        self.start_btn = Button(text='Start Sorting')
-        self.start_btn.bind(on_release=self.start_sorting)
-        self.add_widget(self.start_btn)
-        
-        # Log Output
-        self.log_view = ScrollView()
-        self.log_label = Label(text='', size_hint_y=None)
-        self.log_label.bind(texture_size=self.log_label.setter('size'))
-        self.log_view.add_widget(self.log_label)
-        self.add_widget(self.log_view)
-    
-    def select_output(self, instance):
-        popup = Popup(title='Select Output Directory', size_hint=(0.9, 0.9))
-        file_chooser = FileChooserIconView()
-        def choose_dir(instance):
-            self.output_input.text = file_chooser.path
-            popup.dismiss()
-        select_btn = Button(text='Select', on_release=choose_dir)
-        popup_box = BoxLayout(orientation='vertical')
-        popup_box.add_widget(file_chooser)
-        popup_box.add_widget(select_btn)
-        popup.content = popup_box
-        popup.open()
-    
-    def start_sorting(self, instance):
-        selected_files = self.file_chooser.selection
-        output_dir = self.output_input.text
-        verbose = '--verbose' if self.verbose_check.active else ''
-        dry_run = '--dry-run' if self.dry_run_check.active else ''
-        manual = '--manual' if self.manual_check.active else ''
-        
-        if not selected_files or not output_dir:
-            self.log_label.text = 'Error: Select files and output directory!'
-            return
-        
-        cmd = ['python3', 'main.py', *selected_files, '-o', output_dir, verbose, dry_run, manual]
-        cmd = [arg for arg in cmd if arg]
-        
-        def run_command():
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            for line in process.stdout:
-                self.log_label.text += line
-            for err in process.stderr:
-                self.log_label.text += err
-        
-        threading.Thread(target=run_command, daemon=True).start()
-        self.log_label.text += '\nSorting started...\n'
+# System Settings
+customtkinter.set_appearance_mode("System")
+customtkinter.set_default_color_theme("blue")
 
-class FileSorterApp(App):
-    def build(self):
-        return FileSorterGUI()
+# Function to open file explorer and get directory
+def browse_directory():
+    folder_selected = filedialog.askdirectory()
+    if folder_selected:
+        opt_dir.set(folder_selected)  # Update the entry field
 
-if __name__ == '__main__':
-    FileSorterApp().run()
+# Function to update checkbox states
+def update_option(option, var):
+    run_options[option] = bool(var.get())
+    print(run_options)  # Debugging: Print options when changed
+
+# App Frame
+app = customtkinter.CTk()
+app.geometry("600x480")
+app.title("Paperctl")
+
+# UI Elements
+title = customtkinter.CTkLabel(app, text="Choose Download Directory", font=("Arial", 20))
+title.pack(pady=10)
+
+opt_dir = tkinter.StringVar()
+output_dir = customtkinter.CTkEntry(app, width=400, height=30, textvariable=opt_dir)
+output_dir.pack(pady=10)
+
+# Button to Open File Explorer
+browse_button = customtkinter.CTkButton(app, text="Browse", command=browse_directory)
+browse_button.pack(pady=10)
+
+# Dictionary to store checkbox states
+run_options = {
+    "dry_run": False,
+    "verbose_run": False,
+    "force_run": False,
+    "copy_run": False,
+    "quit_on_error": False
+}
+
+# Checkbutton Variables
+dry_run_var = tkinter.IntVar()
+verbose_var = tkinter.IntVar()
+force_var = tkinter.IntVar()
+copy_var = tkinter.IntVar()
+quit_var = tkinter.IntVar()
+
+# Frame for Checkboxes
+checkbox_frame = customtkinter.CTkFrame(app)
+checkbox_frame.pack(pady=10)
+
+# Checkboxes (side by side)
+dry_run_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Dry Run", variable=dry_run_var, command=lambda: update_option("dry_run", dry_run_var), width=20)
+dry_run_cb.grid(row=0, column=0, padx=5)
+
+verbose_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Verbose", variable=verbose_var, command=lambda: update_option("verbose_run", verbose_var), width=20)
+verbose_cb.grid(row=0, column=1, padx=6)
+
+force_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Force", variable=force_var, command=lambda: update_option("force_run", force_var), width=20)
+force_cb.grid(row=0, column=2, padx=7)
+
+copy_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Copy", variable=copy_var, command=lambda: update_option("copy_run", copy_var), width=20)
+copy_cb.grid(row=0, column=3, padx=8)
+
+quit_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Quit on Error", variable=quit_var, command=lambda: update_option("quit_on_error", quit_var), width=20)
+quit_cb.grid(row=0, column=4, padx=9)
+
+
+
+
+# Run app
+app.mainloop()
+5
