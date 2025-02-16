@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
-import tkinter
+import tkinter as tk
 import customtkinter
-from tkinter import filedialog
+from tkinter import filedialog, Toplevel
+import subprocess
+import threading
 
 # System Settings
 customtkinter.set_appearance_mode("System")
@@ -11,31 +12,57 @@ customtkinter.set_default_color_theme("blue")
 def browse_directory():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
-        opt_dir.set(folder_selected)  # Update the entry field
+        opt_dir.set(folder_selected)
 
-# Function to update checkbox states
-def update_option(option, var):
-    run_options[option] = bool(var.get())
-    print(run_options)  # Debugging: Print options when changed
+# Function to run script with progress bar
+def run_script():
+    output_dir = opt_dir.get()
+    if not output_dir:
+        return
+    
+    options = []
+    if run_options['dry_run']: options.append('-n')
+    if run_options['verbose_run']: options.append('-v')
+    if run_options['force_run']: options.append('-f')
+    if run_options['copy_run']: options.append('-C')
+    if run_options['quit_on_error']: options.append('-Q')
+    
+    cmd = ['python3', 'main.py', output_dir] + options
+    
+    progress_window = Toplevel(app)
+    progress_window.title("Progress")
+    progress_window.geometry("300x100")
+    progress_label = customtkinter.CTkLabel(progress_window, text="Processing...")
+    progress_label.pack(pady=10)
+    progress_bar = customtkinter.CTkProgressBar(progress_window, width=250)
+    progress_bar.set(0)
+    progress_bar.pack(pady=10)
+    
+    def execute():
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        while process.poll() is None:
+            progress_bar.set(progress_bar.get() + 10)
+        progress_bar.set(100)
+        progress_label.configure(text="Completed!")
+    
+    threading.Thread(target=execute, daemon=True).start()
 
 # App Frame
 app = customtkinter.CTk()
-app.geometry("600x480")
+app.geometry("500x300")
 app.title("Paperctl")
 
 # UI Elements
 title = customtkinter.CTkLabel(app, text="Choose Download Directory", font=("Arial", 20))
 title.pack(pady=10)
 
-opt_dir = tkinter.StringVar()
+opt_dir = tk.StringVar()
 output_dir = customtkinter.CTkEntry(app, width=400, height=30, textvariable=opt_dir)
 output_dir.pack(pady=10)
 
-# Button to Open File Explorer
 browse_button = customtkinter.CTkButton(app, text="Browse", command=browse_directory)
 browse_button.pack(pady=10)
 
-# Dictionary to store checkbox states
 run_options = {
     "dry_run": False,
     "verbose_run": False,
@@ -44,36 +71,8 @@ run_options = {
     "quit_on_error": False
 }
 
-# Checkbutton Variables
-dry_run_var = tkinter.IntVar()
-verbose_var = tkinter.IntVar()
-force_var = tkinter.IntVar()
-copy_var = tkinter.IntVar()
-quit_var = tkinter.IntVar()
-
-# Frame for Checkboxes
-checkbox_frame = customtkinter.CTkFrame(app)
-checkbox_frame.pack(pady=10)
-
-# Checkboxes (side by side)
-dry_run_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Dry Run", variable=dry_run_var, command=lambda: update_option("dry_run", dry_run_var), width=20)
-dry_run_cb.grid(row=0, column=0, padx=5)
-
-verbose_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Verbose", variable=verbose_var, command=lambda: update_option("verbose_run", verbose_var), width=20)
-verbose_cb.grid(row=0, column=1, padx=6)
-
-force_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Force", variable=force_var, command=lambda: update_option("force_run", force_var), width=20)
-force_cb.grid(row=0, column=2, padx=7)
-
-copy_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Copy", variable=copy_var, command=lambda: update_option("copy_run", copy_var), width=20)
-copy_cb.grid(row=0, column=3, padx=8)
-
-quit_cb = customtkinter.CTkCheckBox(checkbox_frame, text="Quit on Error", variable=quit_var, command=lambda: update_option("quit_on_error", quit_var), width=20)
-quit_cb.grid(row=0, column=4, padx=9)
-
-
-
+run_button = customtkinter.CTkButton(app, text="Run Script", command=run_script)
+run_button.pack(pady=20)
 
 # Run app
 app.mainloop()
-5
