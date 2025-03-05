@@ -580,7 +580,7 @@ def process_file(file_path, output_dir):
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
 
-def collect_files_and_dirs(paths):
+def collect_files_and_dirs(paths):#ArchNigger
     files = []
     dirs = []
     urls = []
